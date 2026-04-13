@@ -24,6 +24,17 @@ def init_db():
         )
     ''')
 
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS projects (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            description TEXT,
+            created_by INTEGER NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    ''')
+
     # Pre-seed a test user
     cursor.execute('SELECT username FROM users WHERE username = ?', ('admin',))
     if not cursor.fetchone():
@@ -107,7 +118,43 @@ def register():
 @app.route('/home')
 @login_required
 def home():
-    return render_template('home.html', username=session.get('username'))
+    user_id = session.get('user_id')
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT id, name, description, created_at FROM projects WHERE created_by = ? ORDER BY created_at DESC', (user_id,))
+    projects = cursor.fetchall()
+    conn.close()
+    return render_template('home.html', username=session.get('username'), projects=projects)
+
+@app.route('/projects/create', methods=['POST'])
+@login_required
+def create_project():
+    name = request.form.get('name')
+    description = request.form.get('description')
+    user_id = session.get('user_id')
+
+    if name:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO projects (name, description, created_by) VALUES (?, ?, ?)',
+                       (name, description, user_id))
+        conn.commit()
+        conn.close()
+        flash('Project created successfully!', 'success')
+
+    return redirect(url_for('home'))
+
+@app.route('/projects/delete/<int:project_id>', methods=['POST'])
+@login_required
+def delete_project(project_id):
+    user_id = session.get('user_id')
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM projects WHERE id = ? AND created_by = ?', (project_id, user_id))
+    conn.commit()
+    conn.close()
+    flash('Project deleted.', 'success')
+    return redirect(url_for('home'))
 
 @app.route('/logout')
 def logout():

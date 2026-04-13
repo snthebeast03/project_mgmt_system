@@ -1,7 +1,5 @@
-# Virtual environment
-venv/
-
 # Python
+venv/
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,6 +8,7 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+instance/
 
 # IDE
 .idea/
@@ -21,9 +20,15 @@ build/
 .DS_Store
 Thumbs.db
 
+# Node.js
+server/node_modules/
+client/node_modules/
+server/package-lock.json
+client/package-lock.json
+
 # Claude Code
 CLAUDE.md
 
-# Flask
+# Misc
 *.log
-instance/
+claude-resume.txt
