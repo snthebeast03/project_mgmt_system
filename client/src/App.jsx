@@ -153,9 +153,15 @@ function Home() {
   const [newProject, setNewProject] = useState({ name: '', description: '' })
   const [message, setMessage] = useState('')
   const [showCreateForm, setShowCreateForm] = useState(false)
+  const [allUsers, setAllUsers] = useState([])
+  const [projectMembers, setProjectMembers] = useState({})
+  const [projectCreator, setProjectCreator] = useState({})
+  const [showMembersModal, setShowMembersModal] = useState(null)
+  const [newMember, setNewMember] = useState({ username: '', role: 'member' })
 
   useEffect(() => {
     loadProjects()
+    loadUsers()
   }, [])
 
   const loadProjects = async () => {
@@ -163,6 +169,23 @@ function Home() {
     if (res.ok) {
       const data = await res.json()
       setProjects(data.projects)
+    }
+  }
+
+  const loadUsers = async () => {
+    const res = await fetch('/api/users', { credentials: 'include' })
+    if (res.ok) {
+      const data = await res.json()
+      setAllUsers(data.users)
+    }
+  }
+
+  const loadProjectMembers = async (projectId) => {
+    const res = await fetch(`/api/projects/${projectId}/members`, { credentials: 'include' })
+    if (res.ok) {
+      const data = await res.json()
+      setProjectMembers(prev => ({ ...prev, [projectId]: data.members }))
+      setProjectCreator(prev => ({ ...prev, [projectId]: data.creator }))
     }
   }
 
@@ -196,11 +219,49 @@ function Home() {
     }
   }
 
+  const openMembersModal = async (projectId) => {
+    await loadProjectMembers(projectId)
+    setShowMembersModal(projectId)
+  }
+
+  const addMember = async (projectId) => {
+    const res = await fetch(`/api/projects/${projectId}/members`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify(newMember)
+    })
+    if (res.ok) {
+      setMessage('Member added!')
+      loadProjectMembers(projectId)
+      loadProjects()
+      setNewMember({ username: '', role: 'member' })
+      setTimeout(() => setMessage(''), 5000)
+    } else {
+      const data = await res.json()
+      setMessage(data.error)
+      setTimeout(() => setMessage(''), 5000)
+    }
+  }
+
+  const removeMember = async (projectId, memberId) => {
+    const res = await fetch(`/api/projects/${projectId}/members/${memberId}`, {
+      method: 'DELETE',
+      credentials: 'include'
+    })
+    if (res.ok) {
+      setMessage('Member removed')
+      loadProjectMembers(projectId)
+      loadProjects()
+      setTimeout(() => setMessage(''), 5000)
+    }
+  }
+
   return (
     <div>
       <nav style={styles.nav}>
         <div style={styles.navLeft}>
-          <strong>Project Mgmt System</strong>
+          <strong>Project Management System</strong>
           <button onClick={() => setShowCreateForm(!showCreateForm)} style={styles.btnNav}>
             + New Project
           </button>
@@ -233,24 +294,82 @@ function Home() {
         </div>
       )}
 
+      {showMembersModal && (
+        <div style={styles.createModal}>
+          <div style={styles.createForm}>
+            <div style={styles.createFormHeader}>
+              <h3>Members: {projects.find(p => p.id === showMembersModal)?.name || 'Project'}</h3>
+              <button onClick={() => setShowMembersModal(null)} style={styles.closeBtn}>&times;</button>
+            </div>
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Add Member</label>
+              <div style={styles.addMemberRow}>
+                <select style={styles.select} value={newMember.username} onChange={e => setNewMember({ ...newMember, username: e.target.value })}>
+                  <option value="">Select user...</option>
+                  {allUsers.filter(u => {
+                    const currentMembers = projectMembers[showMembersModal] || []
+                    return u.username !== user?.username &&
+                           u.username !== projectCreator[showMembersModal]?.username &&
+                           !currentMembers.some(m => m.username === u.username)
+                  }).map(u => (
+                    <option key={u.id} value={u.username}>{u.username}</option>
+                  ))}
+                </select>
+                <button onClick={() => addMember(showMembersModal)} style={styles.btnSmall}>Add</button>
+              </div>
+            </div>
+            <div style={styles.membersList}>
+              {projectCreator[showMembersModal] && (
+                <div key="creator" style={styles.memberItem}>
+                  <span>{projectCreator[showMembersModal].username} (owner)</span>
+                </div>
+              )}
+              {(projectMembers[showMembersModal] || []).map(member => (
+                <div key={member.id} style={styles.memberItem}>
+                  <span>{member.username} ({member.role})</span>
+                  <button onClick={() => removeMember(showMembersModal, member.id)} style={styles.btnDangerSmall}>&times;</button>
+                </div>
+              ))}
+              {(projectMembers[showMembersModal] || []).length === 0 && !projectCreator[showMembersModal] && (
+                <p style={styles.empty}>No members yet</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={styles.content}>
         {message && <div style={styles.success}>{message}</div>}
 
-        <h2>Your Projects</h2>
-        {projects.length > 0 ? (
-          <div style={styles.grid}>
-            {projects.map(project => (
-              <div key={project.id} style={styles.cardProject}>
-                <h3>{project.name}</h3>
-                <p>{project.description || 'No description'}</p>
-                <p style={styles.meta}>Created: {project.created_at?.slice(0, 10)}</p>
-                <button onClick={() => deleteProject(project.id)} style={styles.btnDanger}>Delete</button>
+        <div style={styles.threeColumn}>
+          <div style={styles.sideBox}></div>
+
+          <div style={styles.mainColumn}>
+            <h2>Your Projects</h2>
+            {projects.length > 0 ? (
+              <div style={styles.grid}>
+                {projects.map(project => (
+                  <div key={project.id} style={styles.cardProject}>
+                    <h3>{project.name}</h3>
+                    <p>{project.description || 'No description'}</p>
+                    <p style={styles.meta}>Created: {project.created_at ? new Date(project.created_at).toLocaleString() : 'N/A'}</p>
+                    <p style={styles.meta}>Members: {project.member_count || 0}</p>
+                    <div style={styles.projectButtons}>
+                      <button onClick={() => openMembersModal(project.id)} style={styles.btnSecondary}>Members</button>
+                      {project.created_by === user?.id && (
+                        <button onClick={() => deleteProject(project.id)} style={styles.btnDanger}>Delete</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-            ))}
+            ) : (
+              <p style={styles.empty}>You don't have any projects yet. Click "+ New Project" in the navbar to create one!</p>
+            )}
           </div>
-        ) : (
-          <p style={styles.empty}>You don't have any projects yet. Click "+ New Project" in the navbar to create one!</p>
-        )}
+
+          <div style={styles.sideBox}></div>
+        </div>
       </div>
     </div>
   )
@@ -288,6 +407,10 @@ const styles = {
   btnPrimary: { width: '100%', padding: '0.75rem', background: '#007bff', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
   btnSuccess: { width: '100%', padding: '0.75rem', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '1rem' },
   btnDanger: { padding: '0.5rem 1rem', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem' },
+  btnSecondary: { padding: '0.5rem 1rem', background: '#6c757d', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem', marginRight: '0.5rem' },
+  btnSmall: { padding: '0.4rem 0.8rem', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.85rem' },
+  btnDangerSmall: { padding: '0.2rem 0.5rem', background: '#dc3545', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' },
+  projectButtons: { display: 'flex', marginTop: '0.5rem' },
   btnNav: { marginLeft: '1rem', padding: '0.4rem 0.8rem', background: '#28a745', color: 'white', border: 'none', borderRadius: '4px', cursor: 'pointer', fontSize: '0.9rem' },
   btnLogout: { background: 'transparent', color: 'white', border: '1px solid white', padding: '0.3rem 0.6rem', borderRadius: '4px', cursor: 'pointer' },
   error: { color: '#dc3545', fontSize: '0.9rem', textAlign: 'center', marginBottom: '1rem' },
@@ -297,11 +420,18 @@ const styles = {
   navLeft: { display: 'flex', alignItems: 'center' },
   navRight: { display: 'flex', alignItems: 'center', gap: '1rem' },
   username: { marginRight: '0.5rem' },
-  content: { padding: '2rem', maxWidth: '800px', margin: '0 auto' },
+  content: { padding: '2rem', width: '100%', boxSizing: 'border-box' },
   createModal: { position: 'fixed', top: '60px', right: '1rem', zIndex: 1000 },
   createForm: { background: 'white', padding: '1.5rem', borderRadius: '8px', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', width: '300px' },
   createFormHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' },
   closeBtn: { background: 'none', border: 'none', fontSize: '1.5rem', cursor: 'pointer', color: '#666', lineHeight: 1 },
+  threeColumn: { display: 'grid', gridTemplateColumns: '1fr 1.5fr 1fr', gap: '1rem' },
+  sideBox: { background: 'white', padding: '1rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', minHeight: '400px' },
+  select: { padding: '0.5rem', border: '1px solid #ccc', borderRadius: '4px', fontSize: '0.9rem', flex: 1 },
+  addMemberRow: { display: 'flex', gap: '0.5rem' },
+  membersList: { marginTop: '1rem', borderTop: '1px solid #eee', paddingTop: '1rem' },
+  memberItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 0', borderBottom: '1px solid #f0f0f0' },
+  mainColumn: { minWidth: 0 },
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '1rem' },
   cardProject: { background: 'white', padding: '1.5rem', borderRadius: '8px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)' },
   meta: { fontSize: '0.8rem', color: '#999', marginBottom: '1rem' },

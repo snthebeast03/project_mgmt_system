@@ -46,6 +46,19 @@ async function initDb() {
     )
   `);
 
+  db.run(`
+    CREATE TABLE IF NOT EXISTS project_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      project_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      role TEXT DEFAULT 'member',
+      added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (project_id) REFERENCES projects(id),
+      FOREIGN KEY (user_id) REFERENCES users(id),
+      UNIQUE(project_id, user_id)
+    )
+  `);
+
   // Pre-seed admin user
   const existingAdmin = db.exec("SELECT id FROM users WHERE username = 'admin'");
   if (existingAdmin.length === 0 || existingAdmin[0].values.length === 0) {
@@ -161,10 +174,79 @@ app.get('/api/me', (req, res) => {
   res.json({ user: { id: req.session.userId, username: req.session.username } });
 });
 
-// Get user's projects
+// Get user's projects (owned or member of)
 app.get('/api/projects', requireAuth, (req, res) => {
-  const projects = queryAll('SELECT id, name, description, created_at FROM projects WHERE created_by = ? ORDER BY created_at DESC', [req.session.userId]);
+  const projects = queryAll(`
+    SELECT p.id, p.name, p.description, p.created_at, p.created_by,
+           1 + (SELECT COUNT(*) FROM project_members WHERE project_id = p.id) as member_count
+    FROM projects p
+    WHERE p.created_by = ? OR p.id IN (SELECT project_id FROM project_members WHERE user_id = ?)
+    ORDER BY p.created_at DESC
+  `, [req.session.userId, req.session.userId]);
   res.json({ projects });
+});
+
+// Get project members
+app.get('/api/projects/:id/members', requireAuth, (req, res) => {
+  const { id } = req.params;
+
+  const project = queryOne('SELECT id, created_by FROM projects WHERE id = ? AND (created_by = ? OR id IN (SELECT project_id FROM project_members WHERE user_id = ?))', [id, req.session.userId, req.session.userId]);
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found or unauthorized' });
+  }
+
+  const creator = queryOne('SELECT id, username FROM users WHERE id = ?', [project.created_by]);
+
+  const members = queryAll(`
+    SELECT pm.id, pm.role, pm.added_at, u.id as user_id, u.username
+    FROM project_members pm
+    JOIN users u ON pm.user_id = u.id
+    WHERE pm.project_id = ?
+  `, [id]);
+
+  res.json({ members, creator });
+});
+
+// Add project member
+app.post('/api/projects/:id/members', requireAuth, (req, res) => {
+  const { id } = req.params;
+  const { username, role } = req.body;
+
+  const project = queryOne('SELECT id FROM projects WHERE id = ? AND created_by = ?', [id, req.session.userId]);
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found or unauthorized' });
+  }
+
+  const user = queryOne('SELECT id FROM users WHERE username = ?', [username]);
+  if (!user) {
+    return res.status(404).json({ error: 'User not found' });
+  }
+
+  try {
+    runSql('INSERT INTO project_members (project_id, user_id, role) VALUES (?, ?, ?)', [id, user.id, role || 'member']);
+    res.json({ message: 'Member added' });
+  } catch (e) {
+    res.status(400).json({ error: 'User is already a member' });
+  }
+});
+
+// Remove project member
+app.delete('/api/projects/:id/members/:memberId', requireAuth, (req, res) => {
+  const { id, memberId } = req.params;
+
+  const project = queryOne('SELECT id FROM projects WHERE id = ? AND created_by = ?', [id, req.session.userId]);
+  if (!project) {
+    return res.status(404).json({ error: 'Project not found or unauthorized' });
+  }
+
+  runSql('DELETE FROM project_members WHERE id = ? AND project_id = ?', [memberId, id]);
+  res.json({ message: 'Member removed' });
+});
+
+// Get all users (for adding members)
+app.get('/api/users', requireAuth, (req, res) => {
+  const users = queryAll('SELECT id, username FROM users ORDER BY username');
+  res.json({ users });
 });
 
 // Create project
